@@ -1,0 +1,215 @@
+#Project 2 Question 3  
+
+Luke Sturgeon  
+Stat 517  
+Due Date: 10/29/18  
+
+####Load Packages and Data  
+
+Packages and data are loaded but not inlcuded in output to save time and space in the report.  
+
+```{r, message=F, include=F,cache=T}
+install.packages("mclust",repos="https://cloud.r-project.org")
+install.packages("cluster",repos="https://cloud.r-project.org")
+install.packages("ggplot2",repos="https://cloud.r-project.org")
+
+install.packages("factoextra",repos="https://cloud.r-project.org")
+install.packages("wordcloud",repos="https://cloud.r-project.org")
+install.packages("FactoMineR",repos="https://cloud.r-project.org")
+install.packages("tidytext",repos="https://cloud.r-project.org")
+install.packages("SnowballC",repos="https://cloud.r-project.org")
+install.packages("caret",repos="https://cloud.r-project.org")
+install.packages("seriation",repos="https://cloud.r-project.org")
+install.packages("arules",repos="https://cloud.r-project.org")
+install.packages("arulesViz",repos="https://cloud.r-project.org")
+install.packages("tm",repos="https://cloud.r-project.org")
+library(arules)
+library(arulesViz)
+library(seriation)
+library(tidytext)
+library(caret)
+library(wordcloud)
+library(SnowballC)
+library(FactoMineR)
+library(mclust)
+library(cluster)
+library(ggplot2)
+library(tm)
+library(factoextra)
+ASV<-read.csv("http://www.webpages.uidaho.edu/~stevel/Datasets/bible_asv.csv",header=TRUE,sep=',')
+attach(ASV)
+text.Book=c()
+for (i in 1:66) {
+    text.Book[i]=paste(text[Books==as.character(unique(Books)[i])],collapse = " ")
+}
+ASV_Books=data.frame(Books=unique(Books),Testaments=as.factor(c(rep("OT",39),rep("NT",27))), 
+                      Sections=as.factor(c(rep("Law",5),rep("History",12),rep("Wisdom",5),rep("Prophets",17),rep("Gospels",5),rep("Paul",13),rep("Apostles",9))),
+                      text=text.Book)
+dim(ASV_Books)
+```
+
+Pre-processing the data so that "tm" package can vectorize the bible.
+
+```{r, message=F, cache=T, warning=F}
+dir.create(paste(getwd(),"/","books",sep=""))
+setwd(paste(file.path(getwd()),"/books",sep=""))
+for (i in 1:nrow(ASV_Books)){
+  titleoutput <- paste("book",i,".txt",sep="")
+  write.table(ASV_Books[i,4], file=titleoutput, row.names=F, col.names=F)
+}
+setwd('..')
+docs <- Corpus(DirSource(paste(getwd(),"/books",sep="")))
+docs <- tm_map(docs, removePunctuation)
+docs <- tm_map(docs,content_transformer(tolower))
+docs <- tm_map(docs, removeNumbers)
+docs <- tm_map(docs, removeWords, stopwords("english"))
+docs <- tm_map(docs, removeWords,c("thou","thine","unto","hast","thy","saith","shal","shall","thee","said","will","upon"))
+docs <- tm_map(docs, stripWhitespace)
+docs <- tm_map(docs,stemDocument)
+dtm <- DocumentTermMatrix(docs)
+dim(dtm)
+```
+
+Because I'm curious, we look at the words that are said the least and most often in the bible.
+
+```{r, message=F, cache=T}
+freq <- colSums(as.matrix(dtm))
+ord <- order(freq,decreasing=TRUE)
+print(freq[head(ord)])
+freq[tail(ord)]
+```
+
+I transform the Document Term Matrix into a matrix that I'm used to seeing and handling, then run PCA to minimize computation time for my overworked, ten year old laptop.
+
+```{r, message=F, cache=T}
+dtm.m <- as.matrix(dtm)
+dtm.m.prcomp <- prcomp(dtm.m)
+fviz_eig(dtm.m.prcomp)
+pca.frame <- (dtm.m.prcomp$x[,1:28])
+row.names(pca.frame)[1] <- "book01.txt"
+row.names(pca.frame)[12] <- "book02.txt"
+row.names(pca.frame)[23] <- "book03.txt"
+row.names(pca.frame)[34] <- "book04.txt"
+row.names(pca.frame)[45] <- "book05.txt"
+row.names(pca.frame)[56] <- "book06.txt"
+row.names(pca.frame)[64] <- "book07.txt"
+row.names(pca.frame)[65] <- "book08.txt"
+row.names(pca.frame)[66] <- "book09.txt"
+pca.frame <- pca.frame[order(rownames(pca.frame)),]
+test.sect <- ASV_Books[,2:3]
+```
+
+Scree plot showing how few dimensions we can use to explain the dataset. The following shows how the first 28 dimensions of the data explain 99% of the variance.
+
+```{r, message=F, cache=T}
+get_eig(dtm.m.prcomp)[1:28,]
+```
+
+Now we see what clustering gets us.
+
+```{r, message=F, cache=T}
+cluster <- Mclust(dtm.m.prcomp$x[,1:28])
+summary(cluster)
+```
+```{r, message=F, cache=T}
+fviz_nbclust(pca.frame[,-c(1:2)],kmeans)
+```
+
+k-means clustering gives us an optimal number of 5 within the bible.
+
+```{r, message=F, cache=T}
+k1 <- kmeans(pca.frame[,-c(1:2)], 5, nstart =25)
+fviz_cluster(k1,pca.frame, geom = "point")
+ASV_Books$Testaments <- as.character(ASV_Books$Testaments)
+for (i in 1:nrow(ASV_Books)){
+         if (ASV_Books[i,2]=="OT") {
+                 ASV_Books[i,2] <- 1
+         } else {
+                 ASV_Books[i,2] <- 2
+         }
+}
+ASV_Books$Testaments <- as.factor(ASV_Books$Testaments)
+table(k1$cluster, ASV_Books$Testaments)
+```
+
+h cluster methods only gave reasonable results when "manhattan" method was used. We see that hclust gives us either 5 or 6 clusters.
+
+```{r, message=F, cache=T}
+d <- dist(pca.frame, method="euclidian")
+hcluster <- hclust(d, method="ward.D2")
+plot(hcluster)
+learned.testaments <- cutree(hcluster,k=2)
+table(learned.testaments,ASV_Books$Testaments)
+```
+
+```{r, message=F, cache = T}
+par(mar=c(1,1,1,1))
+k5 <- kmeans(pca.frame,5)
+k2 <- kmeans(pca.frame,2)
+k7 <- kmeans(pca.frame,7)
+plot(pca.frame, main="K-Means Classifications, k=5")
+points(pca.frame,pch=k5$cluster+1, col=k5$cluster+1)
+points(k5$centers, col=2:3, pch=2:3, cex=1.5)
+table(k5$cluster,ASV_Books$Testaments)
+table(k2$cluster,ASV_Books$Testaments)
+table(k7$cluster,ASV_Books$Sections)
+```
+
+###Seriation
+
+Seriation can help with this dataset by reordering the books and seeing what sections and testaments that they generally fall into. The following is some seriation to see what order the books fall into with the dataset.
+
+```{r,message=F,cache=T}
+d <- dist(pca.frame)
+ser <- seriate(d)
+ser
+```
+```{r,message=F,cache=T}
+pimage(d,main="Random")
+pimage(d,ser,main="Reordered")
+```
+
+```{r, message=F, cache=T}
+methods <- c("TSP", "R2E", "HC", "GW", "OLO", "ARSA")
+ser <- sapply(methods, FUN = function(m) seriate(d,m))
+ser <- ser_align(ser)
+for(s in ser) pimage(d,s, main=get_method(s), key=FALSE)
+```
+```{r,message=F, cache=T}
+crit <- sapply(ser, FUN = function(x) criterion(d, x))
+t(crit)
+```
+
+Hamiltonian path length is minimized with the "OLO" method. We will check the order of the books using the seriation model using that method.
+
+```{r,message=F,cache=T}
+ser.order <- seriate(d,method = "OLO")
+get_order(ser.order)
+```
+
+###Association
+
+Assocation is a little bit clearer on how it can help with this dataset. We can check what testament or section the book belongs to based on the conditional probability of the different words in the book. In other words, we can give a probability of a book being "Book01" (as defined in my PCA dataset) given that "jehovah," "god", and "praise" appear in that book. The following is code that will show some of the association rules that we find in the bible.
+
+```{r, message=F, cache=T}
+dtms <- removeSparseTerms(dtm, 0.2)
+dtms.m <- as.matrix(dtms)
+dtms.m <- t(dtms.m)
+assoc <- as(dtms.m,"transactions")
+itemFrequencyPlot(assoc[, itemFrequency(assoc) > 0.1], cex.names = 0.8)
+image(assoc, method = NULL, measure = "support", shading = "lift", interactive = FALSE, data = NULL, control = NULL, engine = "default")
+#rules <- apriori(assoc, parameter = list(support = 0.9, confidence = 0.6))
+#rules.sort <- sort(rules, by="confidence")
+#inspect(rules.sort[1:3,])
+#plot(rules)
+```
+
+I can't for the life of me get the rules small enough to compute without making everything in the dataset = 1. Since everything belongs to everything, everything belongs to nothing in other words. If things had gone correctly, there would be a list of words commonly found together that would give us a better probability of whether or not that book belongs in that testament.
+
+###Word Plots
+
+For fun to see what the most common words in the bible (that have any meaning) are.
+
+```{r, message=F, cache=T, warning=F}
+wordcloud(names(freq), freq, max.words=25)
+```
