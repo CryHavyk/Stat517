@@ -1,0 +1,155 @@
+#Project 2 Question 2  
+
+Luke Sturgeon  
+Stat 517  
+Due Date: 10/29/18  
+
+###Load Packages and Data   
+
+```{r, message=F, cache=T, warning=F}
+Mt<-read.csv("http://www.webpages.uidaho.edu/~stevel/Datasets/Mt1t.mutate.csv",header=TRUE,sep=',')
+Mt<-Mt[-c(1:3),]
+install.packages("mclust",repos="https://cloud.r-project.org")
+install.packages("dplyr",repos="https://cloud.r-project.org")
+install.packages("cluster",repos="https://cloud.r-project.org")
+install.packages("ggplot2",repos="https://cloud.r-project.org")
+install.packages("plotly", repos="https://cloud.r-project.org")
+install.packages("factoextra", repos="https://cloud.r-project.org")
+install.packages("arules",repos="https://cloud.r-project.org")
+install.packages("arulesViz",repos="https://cloud.r-project.org")
+library(arulesViz)
+library(arules)
+library(factoextra)
+library(mclust)
+library(cluster)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+dim(Mt)
+```
+
+###Pre-processing and PCA  
+
+This problem is concerned with finding how the data groups itself. We would like to see if the data is organized as the given haplogroups say, or if we find another distribution of haplogroups when we analyze the data. We start first with PCA to reduce the size of the dataset into something more manageable, then find the optimal number of components through various methods.
+
+```{r, messsage=F, cache=T, echo=F}
+for(i in 2:ncol(Mt)){
+        Mt[is.na(Mt[,i]), i] <- median(Mt[,i], na.rm = TRUE)
+}
+Mt.m <- as.matrix(sapply(Mt[,-1], as.numeric))
+Mt.pca <- Mt[,-1]
+```
+```{r, message=F, cache=T, echo=F}
+MtPCA <- prcomp(Mt.pca,scale=F)
+biplot(MtPCA,arrow.len=0)
+```
+```{r,message=F,cache=T}
+print(get_eig(MtPCA)[550:560,])
+get_eig(MtPCA)[210:220,]
+```
+```{r, message=F, cache=T}
+fviz_eig(MtPCA)
+```
+
+We see that 556 dimensions will give us 98% of the variance explained, significantly reducing the amount of data we have to compute and only losing 2% of our explanatory variance. Unfortunately, reducing the size of the dataset by nearly half isn't enough to give us reasonable computation speeds. I've had to reduce the number of dimensions to 218 so that 90% of the original variation is captured. 
+
+```{r, message=F, cache=T}
+pca.frame <- MtPCA$x[,1:218]
+```
+
+Now we can start with our clustering and see how closely the clusters we find match with the haplogroups given to us.
+
+```{r, message=F, cache=T}
+fviz_nbclust(pca.frame,kmeans,method="wss")
+fviz_nbclust(pca.frame,kmeans,method="silhouette")
+mclust <- Mclust(pca.frame)
+summary(mclust)
+```
+
+```{r,message=F, cache=T}
+plot(mclust$BIC)
+table(Mt$Group,mclust$classification)
+adjustedRandIndex(Mt$Group,mclust$classification)
+```
+
+Model based clustering is not doing a very good job. It's having a hard time separating the data into more than three distinct groups, so our accuracy is terrible. I have higher hopes for k-means, mostly because I can adjust how many centers to drop into the model.
+
+```{r,message=F, cache=T}
+k3 <- kmeans(pca.frame,3)
+k10 <- kmeans(pca.frame,10) # This is the amount suggest by the "wss" method of NbClust
+print(str(Mt$Group))
+kunique <- kmeans(pca.frame,34) # Because I know how many groups there are and I want to see what cheating will do for us
+plot(pca.frame, main="K-Means Classifications, k=3")
+points(pca.frame,pch=k3$cluster+1, col=k3$cluster+1)
+points(k3$centers, col=2:3, pch=2:3, cex=1.5)
+table(k3$cluster,Mt$Group)
+adjustedRandIndex(k3$cluster,Mt$Group)
+```
+```{r,message=F,cache=T}
+plot(pca.frame, main="K-Means Classifications, k=10")
+points(pca.frame,pch=k10$cluster+1, col=k10$cluster+1)
+points(k10$centers, col=2:3, pch=2:3, cex=1.5)
+table(k10$cluster,Mt$Group)
+adjustedRandIndex(k10$cluster,Mt$Group)
+```
+```{r,message=F, cache=T, warning=F}
+plot(pca.frame,main="K-Means Classification, k=34")
+points(pca.frame,pch=kunique$cluster+1, col=kunique$cluster+1)
+points(kunique$centers, col=2:3, pch=2:3, cex=1.5)
+table(kunique$cluster,Mt$Group)
+adjustedRandIndex(kunique$cluster,Mt$Group)
+```
+
+As we would expect, our accuracy improves as the number of predicted clusters increases. There may be a more nuanced view of this data, but from the original view of my 218 dimensional data (pressed onto a 2D graph), the groups do appear to cluster in roughly three groups. Perhaps, given a better computer and allowing it to run for a week, we would get these models to see the different 34 groups that actually exist in the model. We still have hierarchical clustering to try though.
+
+```{r, message=F, cache=T}
+e <- dist(pca.frame,method="euclidian")
+m <- dist(pca.frame, method="maximum")
+man <- dist(pca.frame, method="manhattan")
+b <- dist(pca.frame, method="binary")
+hclust.s.e <- hclust(e, method="single")
+hclust.s.m <- hclust(m, method="single")
+hclust.s.man <- hclust(man, method="single")
+hclust.s.b <- hclust(b, method="single")
+hclust.c.b <- hclust(b, method="complete")
+hclust.c.man <- hclust(man, method="complete")
+hclust.c.m <- hclust(m, method="complete")
+hclust.c.e <- hclust(e, method="complete")
+hclust.a.e <- hclust(e, method="average")
+hclust.a.m <- hclust(m, method="average")
+hclust.a.man <- hclust(man, method="average")
+hclust.a.b <- hclust(b, method="average")
+hclust.w.b <- hclust(b, method="ward.D2")
+hclust.w.m <- hclust(m, method="ward.D2")
+hclust.w.man <- hclust(man, method="ward.D2")
+hclust.w.e <- hclust(e, method="ward.D2")
+```
+
+I ran a whole boat load of models to see if we can't get a good predictive model. I spared you having to go through lines of code, I only reported the best model. I cut the trees at our previously found 3, 10, and 34 groups that NbClust and Mclust specified.
+
+```{r, message=F, cache=T}
+adjustedRandIndex(Mt$Group,cutree(hclust.w.e,10))
+adjustedRandIndex(Mt$Group,cutree(hclust.w.e,34))
+plot(hclust.w.e)
+rect.hclust(hclust.w.e,k=10,border = "red")
+```
+```{r, message=F, cache=T}
+plot(hclust.w.e)
+rect.hclust(hclust.w.e,k=34,border = "red")
+```
+
+Once again as the number of groupings increased, so did the accuracy of our models. It appears to improve our models, we would want to look into how to get these clustering techniques to find more groupings within the PCA data. 
+
+###Association  
+
+I was curious to see what rules would go together. It won't be as interesting as say the happiness dataset, since the variables are unremarkably named "X###". But this dataset, already given to us in a sparse 0,1 dataset is too good to pass up the opportunity to flex these assocation skills. The following is a brief digression into how these SNPs relate to one another through conditional probability.  
+
+```{r, message=F, cache=T}
+assoc <- as(Mt.m,"transactions")
+itemFrequencyPlot(assoc[, itemFrequency(assoc) > 0.1], cex.names = 0.8)
+image(assoc, method = NULL, measure = "support", shading = "lift", interactive = FALSE, data = NULL, control = NULL, engine = "default")
+rules <- apriori(assoc, parameter = list(support = 0.1, confidence = 0.6))
+rules.sort <- sort(rules, by="confidence")
+inspect(rules.sort[1:3,])
+plot(rules)
+```
