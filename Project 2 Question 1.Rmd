@@ -1,0 +1,362 @@
+---
+output:
+  html_document: default
+  pdf_document: default
+---
+#Project 2 Question 1  
+
+Luke Sturgeon  
+Stat 517  
+Due: 10/29/18  
+
+###Load Packages  
+
+To keep in the same tradition as .ipynb format their work, I will load all the packages and data that this problem needs at the beginning. It helps with analysis so that if I have to rerun a code block, I don't have to take the extra time to install and load the package before working with the data. The actuall code is not shown because that takes too much space when we only have twenty pages to work with.
+
+```{r, message=F,include=F}
+happy2015 <- read.table("https://raw.githubusercontent.com/sauchilee/Stat517/master/Data/World_Happiness_2015.csv", sep=",", header=T)
+happy2016 <- read.table("https://raw.githubusercontent.com/sauchilee/Stat517/master/Data/World_Happiness_2016.csv", sep=",", header=T)
+happy2017 <- read.table("https://raw.githubusercontent.com/sauchilee/Stat517/master/Data/World_Happiness_2017.csv", sep=",", header=T)
+install.packages("mclust",repos="https://cloud.r-project.org")
+install.packages("dplyr",repos="https://cloud.r-project.org")
+install.packages("cluster",repos="https://cloud.r-project.org")
+install.packages("ggplot2",repos="https://cloud.r-project.org")
+install.packages("plotly", repos="https://cloud.r-project.org")
+install.packages("factoextra", repos="https://cloud.r-project.org")
+install.packages("dendextend",repos="https://cloud.r-project.org")
+install.packages("circlize",repos="https://cloud.r-project.org")
+install.packages("seriation",repos="https://cloud.r-project.org")
+library(seriation)
+library(circlize)
+library(dendextend)
+library(factoextra)
+library(mclust)
+library(cluster)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+```
+##Clustering Analysis
+###2015 World Happines Data
+####Exploratory Data Analysis  
+
+To see how the data is structured and how it generally behaves, we go through some basic exploratory data analysis.  
+
+```{r, message=F,cache=T}
+qplot(x=Happiness.Score, y=Freedom, data=happy2015,main="Happiness Score by Freedom",xlab="Happiness Score",ylab="Measurement of Freedom",col=Region)
+```
+
+We see the general shape of the data in a 2D plot. We notice that, in terms of freedom, the countries do appear to roughly group themselves by region. Some regions have more "Freedom" than other, which correlates with a higher happiness rating. Since this is only a 2D model, we're only getting a small slice of how the data is behaving. Next we run some PCA code, not to reduce a relatively small data set even further, but to see which 2 of the 6 continuous explanatory variables explain the most varation. Then we graph that data to get a better idea of how the data is behaving.  
+
+```{r,message=F,cache=T}
+mclust2015 <- Mclust(happy2015[,c(6:12)])
+pca2015DR <- MclustDR(mclust2015)
+summary(pca2015DR)
+```
+
+We see that GDP per Capita and Family are the measures that explain the most variance. We'll map Happiness Score against those.
+
+```{r,message=F,cache=T}
+plot3D <- plot_ly(happy2015, x = ~Happiness.Score, y = ~Family, z = ~Economy..GDP.per.Capita., color =~ Region) %>%
+         add_markers() %>%
+         layout(scene = list(xaxis = list(title = 'Happiness Score'),
+                             yaxis = list(title = 'Family Measurement'),
+                             zaxis = list(title = 'GDP')))
+plot3D
+```
+
+####Finding Appropriate Number of Clusters
+
+Since the functionality of the "mclust" package is so diverse, we start this question with that package. From this package we will digress into k means clustering and hierarchical clustering to see what each method can tell us about the happiness data. The methods used will be repeated across all data sets, so we will see if there is a difference in the optimal number of "n components" for the mclust function, for example, for 2015, 2016, and 2017.  
+
+mclust can be used as a supervised or unsupervised learning method, the difference being whether or not we use the happiness rankings of each country. For unsupervised learning, we would want to ignore the happiness data and see what our models predict in terms of how the data is grouped. Once the model has grouped the data, we would go back and see how many countries the model categorized correctly. 
+
+```{r, message=F, cache=T}
+print(summary(mclust2015))
+plot(mclust2015, what = "BIC")
+```
+```{r, message=F, cache=T}
+happy2015.scale <- scale(happy2015[,5:12])
+fviz_nbclust(happy2015.scale,kmeans,'wss')
+fviz_nbclust(happy2015.scale,kmeans,'silhouette')
+```
+
+The output of Mclust and the graph both show that clustering is optimized when we use 4 components. I suspect the members of these groups are located near each other spatially. Let's see how closely Mclust gets to grouping the countries by region based on predicted happiness scores.
+
+####Mclust clustering  
+
+We now explore what model based clustering looks like within this dataset.
+
+```{r, message=F, cache=T}
+happy2015BIC <- mclustBIC(happy2015[,c(6:12)])
+happy2015summary <- summary(happy2015BIC, data = happy2015[,c(6:12)], G = 4)
+par(mfrow=c(1,2))
+coordProj(data = happy2015[,c(6:12)], dimens = c(1,2), what = "classification",parameters = happy2015summary$parameters, z = happy2015summary$z)
+coordProj(data = happy2015[,c(6:12)], dimens = c(1,2), what = "uncertainty", parameters = happy2015summary$parameters, z = happy2015summary$z)
+```
+```{r, message=F, echo=F, cache=T}
+par(mfrow=c(1,1))
+plot(pca2015DR, what="classification", main = "Classification Areas by GDP and Family Principle Components", xlab="GDP per Capita", ylab="Family Measurement")
+```
+
+```{r, message=F, cache=T}
+happy2015.table.mclust <- table(happy2015$Country,mclust2015$classification)
+happy2015.table.mclust <- as_data_frame(happy2015.table.mclust)
+print(filter(happy2015.table.mclust, Var2==1,n==1))
+print(filter(happy2015.table.mclust, Var2==2,n==1))
+print(filter(happy2015.table.mclust, Var2==3,n==1))
+print(filter(happy2015.table.mclust, Var2==4,n==1))
+```
+
+So we see in the first graph that the 4 groups are trying their best to capture everyone that's in their group. The second graph shows the associated uncertainty of each observation belonging to that classification. The following graph shows the boundaries mclust has created for each category. Although these appear as hard lines, mclust uses a distribution to give each point a proportion of being within that category rather than assigning it a single category. The tibbles printed show a small selection of the countries that have been classified together. From these outputs, it looks like model based selection have put the countries in groups how we would expect them to be grouped; the more developed countries tend to be lumped together and the less developed among themselves as well.
+
+####hclust clustering
+
+We now explore what hierarchical clustering loos like with this dataset.
+
+```{r, message=F, cache=T}
+e <- dist(happy2015.scale,method="euclidian")
+m <- dist(happy2015.scale, method="maximum")
+man <- dist(happy2015.scale, method="manhattan")
+b <- dist(happy2015.scale, method="binary")
+hclust.w.b <- hclust(b, method="ward.D2")
+hclust.w.m <- hclust(m, method="ward.D2")
+hclust.w.man <- hclust(man, method="ward.D2")
+hclust.w.e <- hclust(e, method="ward.D2")
+plot(hclust.w.e)
+rect.hclust(hclust.w.e,k=4,border = "red")
+```
+```{r, message=F, cache=T}
+dend <- as.dendrogram(hclust.w.e)
+dend <- dend %>% color_branches(k=4) %>% color_labels %>% set("branches_lwd", c(2,1,2,1)) %>% set("branches_lty", c(1,2,1,2))
+labels <- as.numeric(labels(dend))
+list <- c()
+countries <- as.character(happy2015$Country)
+for (i in 1:length(labels)){
+        list[i] <- countries[labels[i]]
+}
+labels(dend) <- list
+circlize_dendrogram(dend)
+```
+
+As you can see from this dendrogram, it appears that the countries have been grouped roughly the same way as model based clustering as; countries with similar levels of development have been lumped together.
+
+####kmeans clustering
+
+We see what k means clustering looks like within the data.
+
+```{r, message=F, cache=T}
+k4 <- kmeans(happy2015.scale,4)
+k7 <- kmeans(happy2015.scale,7)
+k10 <- kmeans(happy2015.scale,10)
+plot(happy2015.scale, main="K-Means Classifications, k=4")
+points(happy2015.scale,pch=k4$cluster+1, col=k4$cluster+1)
+points(k4$centers, col=2:3, pch=2:3, cex=1.5)
+k.table <- table(k4$cluster,happy2015$Country)
+k.table <- as_data_frame(happy2015.table.mclust)
+```
+```{r,message=F,cache=T}
+plot(happy2015.scale, main="K-Means Classifications, k=7")
+points(happy2015.scale,pch=k7$cluster+1, col=k7$cluster+1)
+points(k7$centers, col=2:3, pch=2:3, cex=1.5)
+```
+```{r,message=F,cache=T}
+plot(happy2015.scale, main="K-Means Classifications, k=10")
+points(happy2015.scale,pch=k10$cluster+1, col=k10$cluster+1)
+points(k10$centers, col=2:3, pch=2:3, cex=1.5)
+```
+
+Tables from the kmeans model with 4 centers.
+
+```{r,message=F,cache=T}
+print(filter(k.table, Var2==1,n==1))
+print(filter(k.table, Var2==2,n==1))
+print(filter(k.table, Var2==3,n==1))
+print(filter(k.table, Var2==4,n==1))
+```
+
+K means seems to have lumped the groups together pretty well again, although it seems group 2 and 3 have switched spots in terms of development of the countries.
+
+###Repeated data processing for 2016 and 2017 datasets
+
+The process listed above have been repeated for the 2016 and 2017 World Happiness datasets. This data analysis will help answer questions on whether the happiness has changed over time among groups.
+
+####2016 World Happiness Data, Model Based Clustering
+
+```{r,message=F,cache=T}
+mclust2016 <- Mclust(happy2016[,c(6:12)])
+pca2016DR <- MclustDR(mclust2016)
+summary(pca2016DR)
+```
+```{r,message=F,cache=T,warning=F}
+plot3D <- plot_ly(happy2016, x = ~Happiness.Score, y = ~Family, z = ~Economy..GDP.per.Capita., color =~ Region) %>%
+         add_markers() %>%
+         layout(scene = list(xaxis = list(title = 'Happiness Score'),
+                             yaxis = list(title = 'Family Measurement'),
+                             zaxis = list(title = 'GDP')))
+plot3D
+```
+```{r, message=F, cache=T}
+print(summary(mclust2016))
+plot(mclust2016, what = "BIC")
+```
+```{r, message=F, cache=T}
+happy2016.scale <- scale(happy2016[,5:12])
+fviz_nbclust(happy2016.scale,kmeans,'wss')
+fviz_nbclust(happy2016.scale,kmeans,'silhouette')
+```
+```{r, message=F, cache=T}
+happy2016BIC <- mclustBIC(happy2016[,c(6:12)])
+happy2016summary <- summary(happy2016BIC, data = happy2016[,c(6:12)], G = 3)
+par(mfrow=c(1,2))
+coordProj(data = happy2016[,c(6:12)], dimens = c(1,2), what = "classification",parameters = happy2016summary$parameters, z = happy2016summary$z)
+coordProj(data = happy2016[,c(6:12)], dimens = c(1,2), what = "uncertainty", parameters = happy2016summary$parameters, z = happy2016summary$z)
+```
+```{r, message=F, echo=F, cache=T}
+par(mfrow=c(1,1))
+plot(pca2016DR, what="classification", main = "Classification Areas by GDP and Family Principle Components", xlab="GDP per Capita", ylab="Family Measurement")
+```
+```{r, message=F, cache=T}
+happy2016.table.mclust <- table(happy2016$Country,mclust2016$classification)
+happy2016.table.mclust <- as_data_frame(happy2016.table.mclust)
+print(filter(happy2016.table.mclust, Var2==1,n==1))
+print(filter(happy2016.table.mclust, Var2==2,n==1))
+print(filter(happy2016.table.mclust, Var2==3,n==1))
+```
+
+####2017 World Happiness Data, Model Based Clustering
+
+There happens to be no "Region" column in the 2017 data, so a little more preprocessing has to be done with this dataset than the others.
+
+```{r,message=F,cache=T}
+region2016 <- happy2016[,1:2]
+happy2017 <- inner_join(region2016,happy2017)
+mclust2017 <- Mclust(happy2017[,c(6:12)])
+pca2017DR <- MclustDR(mclust2017)
+summary(pca2017DR)
+```
+```{r,message=F,cache=T,warning=F}
+plot3D <- plot_ly(happy2017, x = ~Happiness.Score, y = ~Family, z = ~Economy..GDP.per.Capita., color =~ Region) %>%
+         add_markers() %>%
+         layout(scene = list(xaxis = list(title = 'Happiness Score'),
+                             yaxis = list(title = 'Family Measurement'),
+                             zaxis = list(title = 'GDP')))
+plot3D
+```
+```{r, message=F, cache=T}
+print(summary(mclust2017))
+plot(mclust2017, what = "BIC")
+```
+```{r, message=F, cache=T}
+happy2017.scale <- scale(happy2017[,5:12])
+fviz_nbclust(happy2017.scale,kmeans,'wss')
+fviz_nbclust(happy2017.scale,kmeans,'silhouette')
+```
+```{r, message=F, cache=T}
+happy2017BIC <- mclustBIC(happy2017[,c(6:12)])
+happy2017summary <- summary(happy2017BIC, data = happy2017[,c(6:12)], G = 3)
+par(mfrow=c(1,2))
+coordProj(data = happy2017[,c(6:12)], dimens = c(1,2), what = "classification",parameters = happy2017summary$parameters, z = happy2017summary$z)
+coordProj(data = happy2017[,c(6:12)], dimens = c(1,2), what = "uncertainty", parameters = happy2017summary$parameters, z = happy2017summary$z)
+```
+```{r, message=F, echo=F, cache=T}
+par(mfrow=c(1,1))
+plot(pca2017DR, what="classification", main = "Classification Areas by GDP and Family Principle Components", xlab="GDP per Capita", ylab="Family Measurement")
+```
+```{r, message=F, cache=T}
+happy2017.table.mclust <- table(happy2017$Country,mclust2017$classification)
+happy2017.table.mclust <- as_data_frame(happy2017.table.mclust)
+print(filter(happy2017.table.mclust, Var2==1,n==1))
+print(filter(happy2017.table.mclust, Var2==2,n==1))
+print(filter(happy2017.table.mclust, Var2==3,n==1))
+```
+
+##Seriation
+####2015 World Happiness Data
+
+We use seriation methods with these datasets to see if the order of rankings is what the data suggests or not.
+
+```{r,message=F,cache=T}
+d <- dist(happy2015.scale)
+ser <- seriate(d)
+ser
+```
+```{r,message=F,cache=T}
+pimage(d,main="Random")
+pimage(d,ser,main="Reordered")
+```
+
+It doesn't look like this method of seriation is working very well. We'll try other methods. If that doesn't fix the problem, perhaps scaling the data is messing with our ouputs.
+
+```{r, message=F, cache=T}
+methods <- c("TSP", "R2E", "HC", "GW", "OLO", "ARSA")
+ser <- sapply(methods, FUN = function(m) seriate(d,m))
+ser <- ser_align(ser)
+for(s in ser) pimage(d,s, main=get_method(s), key=FALSE)
+```
+```{r,message=F, cache=T}
+crit <- sapply(ser, FUN = function(x) criterion(d, x))
+t(crit)
+```
+
+The graphs appear to be misleading when compared to the output of the seriation methods. Six methods have been compared. The graphs for TSP appears to be one of the fuzzier; rather than reordering the data so that the objects are as close to the diagonal as possible, it appears to have not permutated the data much at all. The output shows that the Hamiltonian distance of the observations from the diagnoal have been minimized though. For this reason, we will use this method when picking which order the data suggest the countries should be.
+
+```{r,message=F,cache=T}
+ser.order <- seriate(d,method = "TSP")
+country.order <- get_order(ser.order)
+list <- c()
+countries <- as.character(happy2015$Country)
+for (i in 1:length(country.order)){
+        list[i] <- countries[country.order[i]]
+}
+print(head(list))
+tail(list)
+```
+
+It looks like the start of our list tends to be the less developed countries, so I would assume it's listed the countries with the least happy first. The methods are repeated for the 2016 and 2017 data.
+
+####2016 World Happiness Data
+
+```{r,message=F,cache=T}
+d16 <- dist(happy2015.scale)
+ser <- seriate(d16)
+ser
+```
+```{r,message=F,cache=T}
+pimage(d16,main="Random")
+pimage(d16,ser,main="Reordered")
+```
+```{r, message=F, cache=T}
+ser.order <- seriate(d,method = "TSP")
+country.order <- get_order(ser.order)
+list <- c()
+countries <- as.character(happy2016$Country)
+for (i in 1:length(country.order)){
+        list[i] <- countries[country.order[i]]
+}
+print(head(list))
+tail(list)
+```
+
+####2017 World Happiness Data
+
+```{r, message=F, cache=T}
+d17 <- dist(happy2017.scale)
+ser <- seriate(d17)
+ser
+```
+```{r,message=F,cache=T}
+pimage(d17,main="Random")
+pimage(d17,ser,main="Reordered")
+```
+```{r, message=F, cache=T}
+ser.order <- seriate(d,method = "TSP")
+country.order <- get_order(ser.order)
+list <- c()
+countries <- as.character(happy2017$Country)
+for (i in 1:length(country.order)){
+        list[i] <- countries[country.order[i]]
+}
+print(head(list))
+tail(list)
+```
