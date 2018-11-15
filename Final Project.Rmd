@@ -1,0 +1,184 @@
+#Final Project Preliminary Report 
+Luke Sturgeon  
+Stat 517  
+11/15/18  
+
+###Introduction
+Spokane Mining and Research Division (SMRD) is interested in how fatigue factors into workplace accidents. Since miners are exposed to a unique environment, these conditions may affect how workers respond to fatigue. Specifically, the team is interested in gleaning information from the narrative fields that may tell us if the accident was related to fatigue. Since mine operators, safety personal, and the miners themselves have a strong incentive not to report on the job fatigue, this will have to be done in a more nuanced way.
+
+I plan to approach this problem with unsupervised learning. Unsupervised learning takes data and tries to see how the data groups itself. It does not need to have the data specified (i.e. have a ?Fatigue? column with 0, 1 whether it does or doesn?t have to do with fatigue), it?s simply looking for trends. Vectorizing the narrative fields and removing any unnecessary words (either they are filler words, or they explain too little variance, decided through PCA [Principle Component Analysis]) will create a second data set. This dataset will be clustered through various methods, and the method that provides the clearest groupings will be used going forward with the analysis. Once these groups have been created, term frequency counts and other metrics can be used to see why each observation is like its neighbor. Any groups that appear to have fatigue as a possible culprit will have all the observations in that group separated from the AII reports for further analysis with the other 56 variables in the dataset. These analyses will include supervised and association methods, to see if robust predictive models can be made and what words are likely to be associated with fatigue related injuries, respectively.  
+
+###Data and Packages
+```{r, message=FALSE, cache=TRUE, warning=FALSE}
+install.packages("mclust",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("cluster",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("ggplot2",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("factoextra",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("wordcloud",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("FactoMineR",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("tidytext",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("SnowballC",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("caret",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("seriation",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("arules",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("arulesViz",repos="https://ftp.osuosl.org/pub/cran/")
+install.packages("tm",repos="https://ftp.osuosl.org/pub/cran/")
+library(arules)
+library(arulesViz)
+library(seriation)
+library(tidytext)
+library(caret)
+library(wordcloud)
+library(SnowballC)
+library(FactoMineR)
+library(mclust)
+library(cluster)
+library(ggplot2)
+library(tm)
+library(factoextra)
+accidents <- read.csv("https://www.dropbox.com/s/ayfbrrlo1zujga9/Accidents.txt?dl=1", header=T, sep="|")
+colnames(accidents) <- tolower(colnames(accidents))
+```
+
+###Vectorizing the Narrative Field
+
+```{r, message=F, warning=F, cache=T}
+narratives <- as.matrix(accidents$narrative)
+row.names(narratives) <- accidents$document_no
+docs <- Corpus(VectorSource(accidents$narrative))
+docs <- tm_map(docs, removePunctuation)
+docs <- tm_map(docs,content_transformer(tolower))
+docs <- tm_map(docs, removeNumbers)
+docs <- tm_map(docs, removeWords, stopwords("english"))
+docs <- tm_map(docs, stripWhitespace)
+docs <- tm_map(docs,stemDocument)
+dtm <- DocumentTermMatrix(docs)
+dim(dtm)
+```
+
+So we're working with a sparse matrix of 91865 words from 115385 narrative fields. That's a little over 10.5 billion cells, which is about 79 Gb. To work with this data, we're going to have to limit what words we're putting into the Document Term Matrix. I strip the less frequent words, anything that is sparse .98 of the time or more. This gives me a manageable Document Term Matrix, holding only roughly 37 million cells.
+ 
+```{r, message=F, cache=T}
+dtm <- removeSparseTerms(dtm, 0.98)
+dtm
+```
+
+I'd like to see what words are the most common to get a better sense of the matrix. 
+
+```{r, message=F, cache=T}
+freq <- colSums(as.matrix(dtm))
+ord <- order(freq,decreasing=TRUE)
+print(freq[head(ord)])
+freq[tail(ord)]
+```
+
+###PCA
+
+To make the clustering and association packages run quicker later in this analysis, I'll reduce the data even further. As long as I can explain an adequate amount of variance, I should be alright reducing the dataset even further.
+
+```{r, message=F, cache=T, warning=F}
+dtm.m <- as.matrix(dtm)
+dtm.m.prcomp <- prcomp(dtm.m, scale = T)
+fviz_eig(dtm.m.prcomp)
+```
+
+```{r, message=F, cache=T, warning=F}
+biplot(dtm.m.prcomp, col=c("grey","red"))
+```
+
+```{r, message=F, cache=T, warning=F}
+get_eig(dtm.m.prcomp)[188:208,]
+pca.frame <- (dtm.m.prcomp$x[,1:28])
+```
+
+We see that 95% of the variance can be explained with the first 208 dimensions of our PCA. 
+
+###Clustering
+
+Now that we have our reduced dataframe, we can start analysing which narrative fields should be grouped together. We start with model based clustering.When run with the 208 dimensions that 95% variability explanation gives us, the clustering takes too long (more than overnight, at least I stopped the procedure in the morning). Reducining the dimensions down to 50 is still taking hours to finish the model based clustering. Will have to research better ways to narrow the DTM by number of observations. Perhaps going through and eliminating all fields that were caused by mechanical failure rather than human error before uploading dataset to R and starting the pre-processing and analysis
+
+We move on to hierarchical clustering, starting by finding the best distance to use with this data. Since it's all words, my guess is cosine should work the best. If not, need to check the dtm to make sure it's doing what it's supposed to before believing the results. Cosine does not come standard with "dist" function, have to find one that does give cosine distance.
+
+```{r, message=F, cache=T, warning=F}
+#e <- dist(pca.frame, method="euclidian")
+#max <- dist(pca.frame, method="maximum")
+#man <- dist(pca.frame, method="manhattan")
+#can <- dist(pca.frame, method="canberra")
+#bin <- dist(pca.frame, method="binary")
+#min <- dist(pca.frame, method="minkowski")
+#hcluster.es <- hclust(e, method="single")
+#hcluster.ea <- hclust(e, method="average")
+#hcluster.em <- hclust(e, method="median")
+#hcluster.ec <- hclust(e, method="centroid")
+#hcluster.ew <- hclust(e, method="ward.D2")
+#hcluster.maxs <- hclust(max, method="single")
+#hcluster.maxa <- hclust(max, method="average")
+#hcluster.maxm <- hclust(max, method="median")
+#hcluster.maxc <- hclust(max, method="centroid")
+#hcluster.maxw <- hclust(max, method="ward.D2")
+#hcluster.mans <- hclust(man, method="single")
+#hcluster.mana <- hclust(man, method="average")
+#hcluster.manm <- hclust(man, method="median")
+#hcluster.manc <- hclust(man, method="centroid")
+#hcluster.manw <- hclust(man, method="ward.D2")
+#hcluster.cans <- hclust(can, method="single")
+#hcluster.cana <- hclust(can, method="average")
+#hcluster.canm <- hclust(can, method="median")
+#hcluster.canc <- hclust(can, method="centroid")
+#hcluster.canw <- hclust(can, method="ward.D2")
+#hcluster.bins <- hclust(bin, method="single")
+#hcluster.bina <- hclust(bin, method="average")
+#hcluster.binm <- hclust(bin, method="median")
+#hcluster.binc <- hclust(bin, method="centroid")
+#hcluster.binw <- hclust(bin, method="ward.D2")
+#hcluster.mins <- hclust(min, method="single")
+#hcluster.mina <- hclust(min, method="average")
+#hcluster.minm <- hclust(min, method="median")
+#hcluster.minc <- hclust(min, method="centroid")
+#hcluster.minw <- hclust(min, method="ward.D2")
+#plot(hcluster.es)
+```
+
+```{r, message=F, cache=T, warning=F}
+#plot(hcluster.manc)
+```
+
+```{r, message=F, cache=T, warning=F}
+#plot(hcluster.bins)
+```
+
+The dist functions can't handle the size of the pca.frame object, apparently it's 49.6 Gb. Have to reduces the number of observations before input into the system.
+
+Trying k means clustering next
+
+```{r, message=F, cache=T, warning=F}
+k1 <- kmeans(pca.frame[,-c(1:2)], 5, nstart =10)
+fviz_cluster(k1,pca.frame, geom = "point")
+```
+
+```{r, message=F, cache=T, warning=F}
+k2 <- kmeans(pca.frame[,-c(1:2)], 10, nstart =10)
+fviz_cluster(k2,pca.frame, geom = "point")
+```
+
+```{r, message=F, cache=T, warning=F}
+k3 <- kmeans(pca.frame[,-c(1:2)], 20, nstart =10)
+fviz_cluster(k3,pca.frame, geom = "point")
+```
+
+```{r, message=F, cache=T, warning=F}
+k4 <- kmeans(pca.frame[,-c(1:2)], 50, nstart =10)
+fviz_cluster(k4,pca.frame, geom = "point")
+```
+
+```{r, message=F, cache=T, warning=F}
+k5 <- kmeans(pca.frame[,-c(1:2)], 100, nstart =10)
+fviz_cluster(k5,pca.frame, geom = "point")
+```
+
+###To Dos
+I need to contact the team from the CDC and see if they have any suggestions on attenuating the data before import. The size of this dataset is not going to work, there has to be some criteria I can use to shave off a few million observations without losing any related to fatigue. I'm thinking a keyword such for stop words is a good place to start; anything to do with "structural" for instance. After that the model based clustering and hierarchical clustering will be a bit easier.
+
+Once appropriately clustered, feature selection is up next. I'm planning on using the most frequent words used in each cluster as a good indication of what each cluster is saying/why these narrative fields are clustered. RobotAnalyst has a different method of feature selection that I want to look into. I think a more nuanced approach to feature selection is required for this project since there's an incentive not to come out and say you were tired and that's what caused the accident.
+
+Once clusters are selected as relating to miner fatigue, those narrative fields that compose those clusters will be filtered from the larger dataset. With those in hand, exploratory data analysis and any further statistical analyses required to predict what conditions may lead to an accident caused by fatigue will be done. 
